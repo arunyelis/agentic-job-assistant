@@ -1,0 +1,37 @@
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: career_workspace
+      POSTGRES_USER: career_workspace
+      POSTGRES_PASSWORD: local-career-workspace
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U career_workspace -d career_workspace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - career_workspace_database:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      database:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      AUTH_MODE: local
+      AUTH_SECRET: ${AUTH_SECRET:-local-compose-auth-secret-change-me}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-local-compose-encryption-key-change-me}
+      DATABASE_URL: postgresql+psycopg://career_workspace:local-career-workspace@database:5432/career_workspace
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - career_workspace_artifacts:/app/data/artifacts
+
+volumes:
+  career_workspace_database:
+  career_workspace_artifacts:

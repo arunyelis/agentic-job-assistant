@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+data
+logs
+artifacts
+frontend/dist
+frontend/node_modules
+extension/dist
+extension/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+*.pyc
+.DS_Store

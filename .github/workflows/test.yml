@@ -1,0 +1,49 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            extension/package-lock.json
+      - run: pip install uv
+      - run: uv sync --locked --dev
+      - run: npm ci --prefix frontend
+      - run: npm ci --prefix extension
+      - run: uv run ruff check backend tests
+      - run: uv run pytest
+      - run: npm run typecheck --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run typecheck --prefix extension
+      - run: npm test --prefix extension
+      - run: npm run build --prefix frontend
+      - run: npm run build --prefix extension
+      - run: npm audit --prefix frontend --audit-level=high
+      - run: npm audit --prefix extension --audit-level=high
+      - run: uv run pip-audit
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
