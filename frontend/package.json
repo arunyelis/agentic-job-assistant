@@ -1,0 +1,24 @@
+{
+  "name": "agentic-job-assistant-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "setup:browser": "playwright install chromium"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/mcp": "^0.0.78",
+    "@vitejs/plugin-react": "^6.0.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.0.18"
+  }
+}
