@@ -36,6 +36,11 @@ class Config:
     rate_limit_per_minute: int = 120
     cors_origins: tuple[str, ...] = ()
     openai_base_url: str | None = None
+    typesafe_api_key: str = ""
+    typesafe_model: str = "jev-latest"
+    typesafe_base_url: str | None = None
+    typesafe_concurrency: int = 16
+    shortlist_percentile: int = 10
 
 
 def load_config() -> Config:
@@ -83,4 +88,9 @@ def load_config() -> Config:
         ),
         cors_origins=cors_origins,
         openai_base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
+        typesafe_api_key=os.getenv("TYPESAFE_API_KEY", "").strip(),
+        typesafe_model=os.getenv("TYPESAFE_MODEL", "jev-latest").strip(),
+        typesafe_base_url=os.getenv("TYPESAFE_BASE_URL", "").strip() or None,
+        typesafe_concurrency=max(1, int(os.getenv("TYPESAFE_CONCURRENCY", "16"))),
+        shortlist_percentile=min(100, max(1, int(os.getenv("SHORTLIST_PERCENTILE", "10")))),
     )

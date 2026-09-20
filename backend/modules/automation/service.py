@@ -21,6 +21,7 @@ from backend.models import (
 from backend.modules.automation.planner import WorkflowPlanner
 from backend.modules.automation.schemas import RunCreate, TaskInput
 from backend.modules.automation.tools import ToolContext, ToolRegistry
+from backend.modules.matching import JobRanker
 
 DEFAULT_AGENT_INSTRUCTIONS = """
 You are the Career Workspace assistant. Help the user understand and progress their
@@ -41,11 +42,12 @@ class AutomationService:
         database: Database,
         provider: LLMProvider,
         registry: ToolRegistry | None = None,
+        ranker: JobRanker | None = None,
     ):
         self.config = config
         self.database = database
         self.provider = provider
-        self.registry = registry or ToolRegistry()
+        self.registry = registry or ToolRegistry(ranker=ranker)
         self.planner = WorkflowPlanner(config, provider)
         self.queue: asyncio.Queue[str | None] = asyncio.Queue()
         self.worker_task: asyncio.Task | None = None

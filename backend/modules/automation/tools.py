@@ -10,6 +10,7 @@ from backend.modules.applications import (
     add_application_event,
     get_application_timeline,
 )
+from backend.modules.matching import JobRanker, Posting
 
 SideEffect = Literal["none", "workspace", "external"]
 
@@ -248,8 +249,87 @@ class UpdateApplicationStatusTool:
         }
 
 
+class PostingInput(BaseModel):
+    id: str = Field(max_length=120)
+    title: str = Field(max_length=300)
+    text: str = Field(max_length=20000)
+    location: str = Field(default="", max_length=200)
+    company: str = Field(default="", max_length=200)
+    url: str = Field(default="", max_length=1000)
+
+
+class RankPostingsInput(BaseModel):
+    postings: list[PostingInput] = Field(min_length=1, max_length=200)
+    profile: dict = Field(default_factory=dict)
+    shortlist_percentile: int = Field(default=10, ge=1, le=100)
+
+
+class RankPostingsTool:
+    """Rank postings against the candidate profile and say which deserve a tailoring pass.
+
+    Read-only and side-effect free: it spends judgment tokens, writes nothing, and
+    returns the ordering plus a verdict per posting so the caller decides what to
+    generate. Degrades to keyword ranking rather than failing when the judgment
+    service is unreachable.
+    """
+
+    name = "jobs.rank"
+    description = (
+        "Score job postings against the candidate profile and return them ranked, "
+        "with a verdict saying which are worth tailoring a resume for."
+    )
+    input_model = RankPostingsInput
+    side_effect: SideEffect = "none"
+    requires_confirmation = False
+
+    def __init__(self, ranker: JobRanker):
+        self._ranker = ranker
+
+    async def execute(self, context: ToolContext, payload: RankPostingsInput) -> dict:
+        postings = [
+            Posting(
+                id=item.id,
+                title=item.title,
+                text=item.text,
+                location=item.location,
+                company=item.company,
+                url=item.url,
+            )
+            for item in payload.postings
+        ]
+        result = await self._ranker.rank(
+            payload.profile, postings, payload.shortlist_percentile
+        )
+        return {
+            "degraded": result.degraded,
+            "reason": result.reason,
+            "shortlist_size": len(result.shortlist),
+            "ranked": [
+                {
+                    "id": item.posting.id,
+                    "title": item.posting.title,
+                    "company": item.posting.company,
+                    "url": item.posting.url,
+                    "fit": round(item.score.fit, 4),
+                    "verdict": item.verdict,
+                    "role_type": item.score.role_type,
+                    "blocked": item.score.blocked,
+                    "overclaim_risk": round(item.score.overclaim, 3),
+                    "tailoring_upside": round(item.score.tailoring_upside, 3),
+                    "dimensions": {k: round(v, 3) for k, v in item.score.dimensions.items()},
+                    "notes": list(item.score.notes),
+                }
+                for item in result.ranked
+            ],
+        }
+
+
 class ToolRegistry:
-    def __init__(self, tools: list[AutomationTool] | None = None):
+    def __init__(
+        self,
+        tools: list[AutomationTool] | None = None,
+        ranker: JobRanker | None = None,
+    ):
         default_tools: list[AutomationTool] = [
             SearchApplicationsTool(),
             PipelineSummaryTool(),
@@ -257,6 +337,8 @@ class ToolRegistry:
             ApplicationTimelineTool(),
             UpdateApplicationStatusTool(),
         ]
+        if ranker is not None:
+            default_tools.append(RankPostingsTool(ranker))
         self._tools = {tool.name: tool for tool in (tools or default_tools)}
 
     def catalog(self) -> list[dict]:

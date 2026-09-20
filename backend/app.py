@@ -15,9 +15,11 @@ from backend.auth import AuthService
 from backend.browser import PlaywrightBrowser
 from backend.config import Config, load_config
 from backend.database import Database
+from backend.integrations.judgment import JudgmentProvider, TypeSafeJudgmentProvider
 from backend.integrations.llm import LLMProvider, OpenAIResponsesProvider
 from backend.logger import JsonLogger
 from backend.modules.automation import AutomationService, create_automation_router
+from backend.modules.matching import JobRanker
 from backend.resume import MAX_RESUME_BYTES, ResumeError, extract_resume
 from backend.security import SecurityMiddleware
 from backend.skills import load_skills
@@ -45,6 +47,7 @@ def create_app(
     database: Database | None = None,
     storage: EncryptedFileStore | None = None,
     llm_provider: LLMProvider | None = None,
+    judgment_provider: JudgmentProvider | None = None,
     automation_service: AutomationService | None = None,
 ) -> FastAPI:
     set_tracing_disabled(True)
@@ -63,10 +66,17 @@ def create_app(
         config.api_key,
         config.openai_base_url,
     )
+    judgment_provider = judgment_provider or TypeSafeJudgmentProvider(
+        config.typesafe_api_key,
+        config.typesafe_base_url,
+        config.typesafe_model,
+    )
+    ranker = JobRanker(judgment_provider, config.typesafe_concurrency)
     automation_service = automation_service or AutomationService(
         config,
         database,
         llm_provider,
+        ranker=ranker,
     )
 
     @asynccontextmanager
