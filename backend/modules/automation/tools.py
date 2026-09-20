@@ -271,6 +271,10 @@ class RankPostingsTool:
     returns the ordering plus a verdict per posting so the caller decides what to
     generate. Degrades to keyword ranking rather than failing when the judgment
     service is unreachable.
+
+    The ordering is measured and stable. The cut-offs between verdicts are not: they
+    are placeholders until outcome data exists to fit them, which `calibrated` and
+    `assumed_parameters` report on every response.
     """
 
     name = "jobs.rank"
@@ -303,6 +307,8 @@ class RankPostingsTool:
         return {
             "degraded": result.degraded,
             "reason": result.reason,
+            "calibrated": result.calibrated,
+            "assumed_parameters": list(result.calibration.assumed_parameters),
             "shortlist_size": len(result.shortlist),
             "ranked": [
                 {

@@ -12,6 +12,8 @@ from backend.integrations.judgment import (
     TypeSafeJudgmentProvider,
 )
 from backend.modules.matching import (
+    UNCALIBRATED_DEFAULT,
+    Calibration,
     JobRanker,
     Posting,
     build_score,
@@ -269,3 +271,60 @@ def test_malformed_questions_are_rejected_before_the_network():
     with pytest.raises(ValueError):
         from backend.integrations.judgment.typesafe_provider import _encode
         _encode(Score(instructions="q", criteria=["only one"]))
+
+
+# --- calibration: the parameters are assumptions until outcomes say otherwise ---
+
+
+def test_default_calibration_reports_itself_as_unfitted():
+    assert not UNCALIBRATED_DEFAULT.is_calibrated
+    assumed = UNCALIBRATED_DEFAULT.assumed_parameters
+    assert "weights" in assumed
+    assert "shortlist_percentile" in assumed
+    assert "sampling_spread" not in assumed, "sampling spread was measured, not assumed"
+
+
+def test_a_fitted_calibration_reports_no_assumptions():
+    fitted = Calibration(name="from-outcomes-2026-Q4", is_calibrated=True)
+    assert fitted.assumed_parameters == ()
+
+
+def test_weights_must_sum_to_one():
+    with pytest.raises(ValueError, match="sum to 1.0"):
+        Calibration(weights={"coverage": 0.9, "domain": 0.9, "seniority": 0.1, "ai_alignment": 0.1})
+
+
+def test_percentile_is_bounded():
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        Calibration(shortlist_percentile=0)
+
+
+def test_changing_weights_changes_fit_without_touching_the_model():
+    """Re-weighting is a code change, not a re-run. No judgment is re-requested."""
+    ai_heavy = Calibration(
+        weights={"coverage": 0.1, "domain": 0.1, "seniority": 0.1, "ai_alignment": 0.7}
+    )
+    baseline = build_score("a", answers())
+    weighted = build_score("a", answers(), ai_heavy)
+    assert weighted.fit != baseline.fit
+    assert weighted.dimensions["ai_alignment"] == baseline.dimensions["ai_alignment"]
+
+
+def test_calibration_controls_the_veto_threshold():
+    lenient = Calibration(blocker_probability=0.99)
+    marginal = answers(hard_blocker=NoulAnswer(probability=0.8))
+    assert build_score("a", marginal).blocked
+    assert not build_score("a", marginal, lenient).blocked
+
+
+async def test_ranking_result_carries_the_calibration_state_forward():
+    result = await JobRanker(StubProvider()).rank(PROFILE, POSTINGS)
+    assert not result.calibrated
+    assert "weights" in result.calibration.assumed_parameters
+
+
+async def test_degraded_results_also_report_calibration_state():
+    result = await JobRanker(StubProvider(error=JudgmentUnavailable("down"))).rank(
+        PROFILE, POSTINGS
+    )
+    assert result.degraded and not result.calibrated

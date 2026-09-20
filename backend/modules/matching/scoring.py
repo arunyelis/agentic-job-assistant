@@ -1,36 +1,29 @@
-"""Composition and gating. Every weight and cut-off here belongs to code, not the model.
+"""Composition and gating. Every weight and cut-off belongs to code, not the model.
 
-Two rules this module exists to enforce, both learned by measuring rather than
-by reading the documentation:
+Three rules this module exists to enforce, each learned by measuring rather than
+by reasoning, and each after getting it wrong first:
 
 1. Never gate on `confidence`. It reports how peaked a distribution is, not whether
    an answer is safe to act on. A Score split across two adjacent *passing* levels
    and a Choice split between two *acceptable* options both look uncertain and are
    not. Gate on the probability mass of the outcome the code branches on.
 2. Never gate on an absolute score. Thresholds calibrated on hand-written examples
-   do not survive contact with real postings: real job descriptions carry far more
+   do not survive contact with real postings: real descriptions carry far more
    requirements, which pushes coverage down and overclaim up for every candidate.
    Rank within the corpus and take a percentile.
+3. Never apply an absolute standard to a relative corpus, which is rule 2 wearing a
+   different hat. `boundary_risk` measures distance from a fixed rubric level; on
+   real postings every candidate straddles that level, so gating on it sent the
+   whole corpus to review. It is reported, never gated.
+
+The numbers themselves live in `Calibration` and are mostly still assumptions.
 """
 
 from dataclasses import dataclass, field
 
 from backend.integrations.judgment import Answer, ChoiceAnswer, NoulAnswer, ScoreAnswer
+from backend.modules.matching.calibration import UNCALIBRATED_DEFAULT, Calibration
 from backend.modules.matching.questions import PASSING_LEVEL
-
-WEIGHTS = {"coverage": 0.35, "domain": 0.25, "seniority": 0.20, "ai_alignment": 0.20}
-SENIORITY_VALUE = {"matched": 1.0, "over_leveled": 0.75, "under_leveled": 0.25}
-
-BLOCKER_PROBABILITY = 0.70
-VETO_MULTIPLIER = 0.15
-UNDER_LEVELED_LIMIT = 0.35
-BOUNDARY_RISK_LIMIT = 0.50
-DEFAULT_SHORTLIST_PERCENTILE = 10
-
-# Identical calls vary by about 0.02 on a 0..1 scale, so any absolute comparison
-# needs more margin than that. Ranking is unaffected: two independent runs over 80
-# real postings agreed at Spearman 0.984 with the top ten identical.
-SAMPLING_SPREAD = 0.03
 
 Verdict = str
 TAILOR = "tailor"
@@ -76,18 +69,21 @@ def _noul(answers: dict[str, Answer], key: str) -> NoulAnswer:
     return answer
 
 
-def build_score(job_id: str, answers: dict[str, Answer]) -> JobScore:
+def build_score(
+    job_id: str,
+    answers: dict[str, Answer],
+    calibration: Calibration = UNCALIBRATED_DEFAULT,
+) -> JobScore:
     graded = {key: _score(answers, key) for key in ("coverage", "domain", "ai_alignment")}
     seniority = _choice(answers, "seniority")
 
     dimensions = {key: answer.normalized for key, answer in graded.items()}
-    dimensions["seniority"] = SENIORITY_VALUE.get(seniority.choice, 0.25)
+    dimensions["seniority"] = calibration.seniority_value.get(seniority.choice, 0.25)
 
-    fit = sum(WEIGHTS[key] * value for key, value in dimensions.items())
-    blocker = _noul(answers, "hard_blocker").probability
-    blocked = blocker > BLOCKER_PROBABILITY
+    fit = sum(calibration.weights[key] * value for key, value in dimensions.items())
+    blocked = _noul(answers, "hard_blocker").probability > calibration.blocker_probability
     if blocked:
-        fit *= VETO_MULTIPLIER
+        fit *= calibration.veto_multiplier
 
     return JobScore(
         job_id=job_id,
@@ -95,6 +91,8 @@ def build_score(job_id: str, answers: dict[str, Answer]) -> JobScore:
         dimensions=dimensions,
         role_type=_choice(answers, "role_type").choice,
         blocked=blocked,
+        # Reported for display: "this dimension is genuinely split" is useful to a
+        # reader. It is deliberately not a gate; see rule 3 above.
         boundary_risk=max(a.boundary_risk(PASSING_LEVEL) for a in graded.values()),
         overclaim=_noul(answers, "overclaim_risk").probability,
         tailoring_upside=_score(answers, "tailoring_upside").normalized,
@@ -103,8 +101,8 @@ def build_score(job_id: str, answers: dict[str, Answer]) -> JobScore:
     )
 
 
-def shortlist_cutoff(scores: list[JobScore], percentile: int = DEFAULT_SHORTLIST_PERCENTILE) -> float:
-    """The fit value that separates the top `percentile` of this corpus.
+def shortlist_cutoff(scores: list[JobScore], percentile: int) -> float:
+    """The fit value separating the top `percentile` of this corpus.
 
     A percentile rather than a constant, because the absolute scale moves with the
     corpus: dense enterprise postings score lower across the board than short ones,
@@ -117,34 +115,38 @@ def shortlist_cutoff(scores: list[JobScore], percentile: int = DEFAULT_SHORTLIST
     return ranked[index]
 
 
-def decide(score: JobScore, cutoff: float) -> Verdict:
+def decide(
+    score: JobScore,
+    cutoff: float,
+    calibration: Calibration = UNCALIBRATED_DEFAULT,
+) -> Verdict:
     """What the pipeline should spend on this posting next.
 
-    `boundary_risk` is deliberately not a gate here. It measures distance from a
-    fixed rubric level, and on real postings every candidate straddles that level
-    on coverage, so gating on it sends the entire corpus to review. It is carried
-    on the score for display, where "this dimension is genuinely split" is useful
-    to a reader, and the gate uses position instead: review a posting only when
-    sampling noise could move it across the shortlist line, because that is the
-    only case where a human looking changes the outcome.
+    Review means "a human looking changes the outcome", which is true in exactly two
+    cases: the posting sits close enough to the shortlist line that sampling noise
+    could move it either side, or the candidate may be under-levelled for it.
     """
-    if score.blocked or score.fit + SAMPLING_SPREAD < cutoff:
+    spread = calibration.sampling_spread
+    if score.blocked or score.fit + spread < cutoff:
         return SKIP
-    if score.overclaim > 0.80:
+    if score.overclaim > calibration.overclaim_limit:
         return HONEST_GAP
-    if score.under_leveled > UNDER_LEVELED_LIMIT:
+    if score.under_leveled > calibration.under_leveled_limit:
         return REVIEW
-    if abs(score.fit - cutoff) <= SAMPLING_SPREAD:
+    if abs(score.fit - cutoff) <= spread:
         return REVIEW
     return TAILOR
 
 
 def rank(
-    scores: list[JobScore], percentile: int = DEFAULT_SHORTLIST_PERCENTILE
+    scores: list[JobScore],
+    calibration: Calibration = UNCALIBRATED_DEFAULT,
+    percentile: int | None = None,
 ) -> list[tuple[JobScore, Verdict]]:
-    cutoff = shortlist_cutoff(scores, percentile)
+    cut_at = percentile if percentile is not None else calibration.shortlist_percentile
+    cutoff = shortlist_cutoff(scores, cut_at)
     ordered = sorted(scores, key=lambda s: -s.fit)
-    return [(score, decide(score, cutoff)) for score in ordered]
+    return [(score, decide(score, cutoff, calibration)) for score in ordered]
 
 
 def fallback_score(job_id: str, title: str, text: str, keywords: list[str]) -> JobScore:

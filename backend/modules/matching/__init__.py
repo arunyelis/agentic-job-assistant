@@ -1,3 +1,8 @@
+from backend.modules.matching.calibration import (
+    PROVENANCE,
+    UNCALIBRATED_DEFAULT,
+    Calibration,
+)
 from backend.modules.matching.questions import MATCH_QUESTIONS
 from backend.modules.matching.scoring import (
     JobScore,
@@ -17,6 +22,9 @@ from backend.modules.matching.service import (
 
 __all__ = [
     "MATCH_QUESTIONS",
+    "PROVENANCE",
+    "UNCALIBRATED_DEFAULT",
+    "Calibration",
     "JobRanker",
     "JobScore",
     "Posting",

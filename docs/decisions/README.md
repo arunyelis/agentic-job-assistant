@@ -9,3 +9,9 @@ Each record contains the date, status, context, decision, consequences, and foll
 - [0003: Use a modular Python backend](0003-modular-python-backend.md)
 - [0004: Use durable asynchronous task graphs](0004-durable-asynchronous-task-graphs.md)
 - [0005: Keep one server-side language model gateway](0005-server-side-language-model-gateway.md)
+- [0006: Add a typed judgment provider for ranking](0006-typed-judgment-provider.md)
+- [0007: Ranking thresholds stay uncalibrated, deliberately](0007-ranking-calibration-deferred.md) *(deferred)*
+
+A record with status **deferred** states a question the project has deliberately not
+answered yet, why answering it now would be guesswork, and what evidence would settle
+it. Revisit it when that evidence exists, not before.

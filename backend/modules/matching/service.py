@@ -2,9 +2,9 @@ import asyncio
 from dataclasses import dataclass
 
 from backend.integrations.judgment import JudgmentProvider, JudgmentUnavailable
+from backend.modules.matching.calibration import UNCALIBRATED_DEFAULT, Calibration
 from backend.modules.matching.questions import MATCH_QUESTIONS
 from backend.modules.matching.scoring import (
-    DEFAULT_SHORTLIST_PERCENTILE,
     JobScore,
     Verdict,
     build_score,
@@ -38,10 +38,21 @@ class RankingResult:
     ranked: list[RankedPosting]
     degraded: bool
     reason: str = ""
+    calibration: Calibration = UNCALIBRATED_DEFAULT
 
     @property
     def shortlist(self) -> list[RankedPosting]:
         return [item for item in self.ranked if item.verdict == "tailor"]
+
+    @property
+    def calibrated(self) -> bool:
+        """Whether the thresholds behind these verdicts were fitted to outcomes.
+
+        False means the ordering is trustworthy but the cut-off between verdicts is
+        a placeholder. Callers must not present the verdicts as settled while this
+        is false.
+        """
+        return self.calibration.is_calibrated
 
 
 class JobRanker:
@@ -57,9 +68,15 @@ class JobRanker:
         self,
         provider: JudgmentProvider | None,
         concurrency: int = DEFAULT_CONCURRENCY,
+        calibration: Calibration = UNCALIBRATED_DEFAULT,
     ):
         self._provider = provider
+        self._calibration = calibration
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    @property
+    def calibration(self) -> Calibration:
+        return self._calibration
 
     async def _judge(self, profile: dict, posting: Posting) -> JobScore:
         state = {
@@ -72,16 +89,16 @@ class JobRanker:
         }
         async with self._semaphore:
             answers = await self._provider.judge(state, MATCH_QUESTIONS)
-        return build_score(posting.id, answers)
+        return build_score(posting.id, answers, self._calibration)
 
     async def rank(
         self,
         profile: dict,
         postings: list[Posting],
-        percentile: int = DEFAULT_SHORTLIST_PERCENTILE,
+        percentile: int | None = None,
     ) -> RankingResult:
         if not postings:
-            return RankingResult(ranked=[], degraded=False)
+            return RankingResult(ranked=[], degraded=False, calibration=self._calibration)
 
         if self._provider is None or not self._provider.available:
             return self._degraded(profile, postings, percentile, "judgment service not configured")
@@ -100,14 +117,17 @@ class JobRanker:
             )
 
         by_id = {posting.id: posting for posting in postings}
-        ordered = rank([r for r in results if isinstance(r, JobScore)], percentile)
+        ordered = rank(
+            [r for r in results if isinstance(r, JobScore)], self._calibration, percentile
+        )
         return RankingResult(
             ranked=[RankedPosting(by_id[s.job_id], s, v) for s, v in ordered],
             degraded=False,
+            calibration=self._calibration,
         )
 
     def _degraded(
-        self, profile: dict, postings: list[Posting], percentile: int, reason: str
+        self, profile: dict, postings: list[Posting], percentile: int | None, reason: str
     ) -> RankingResult:
         keywords = _profile_keywords(profile)
         scores = [
@@ -115,11 +135,12 @@ class JobRanker:
             for posting in postings
         ]
         by_id = {posting.id: posting for posting in postings}
-        ordered = rank(scores, percentile)
+        ordered = rank(scores, self._calibration, percentile)
         return RankingResult(
             ranked=[RankedPosting(by_id[s.job_id], s, v) for s, v in ordered],
             degraded=True,
             reason=reason,
+            calibration=self._calibration,
         )
 
 
