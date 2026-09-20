@@ -23,3 +23,7 @@ logs/*
 !logs/.gitkeep
 data/*
 !data/.gitkeep
+
+# Product strategy lives in the private career-workspace-product repo
+docs/product/
+docs/backlog/

@@ -137,15 +137,15 @@ It cannot log in, submit forms, send email, or claim that an external action hap
 
 ## Documentation
 
-- [Product vision](docs/product/vision.md)
-- [Founder research journal](docs/product/research-journal.md)
-- [Roadmap](docs/product/roadmap.md)
-- [Design system](docs/product/design-system.md)
 - [System architecture](docs/architecture/system.md)
 - [Privacy and security baseline](docs/architecture/privacy-security.md)
+- [Design system](docs/design-system.md)
 - [Decision records](docs/decisions/README.md)
 
-These documents are the source of truth across future development sessions. Meaningful product or architecture changes should update the related document or add a decision record.
+Product strategy, the UX specification, and the development backlog are maintained in a
+separate private repository and are not part of this codebase.
+
+These documents are the source of truth for how the system is built. Meaningful architecture changes should update the related document or add a decision record. This README describes the current implementation.
 
 ## Tests and checks
 
